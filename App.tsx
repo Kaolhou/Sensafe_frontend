@@ -360,6 +360,7 @@ const RecordTypeSelector: React.FC<RecordTypeSelectorProps> = ({ value, onChange
 interface RegistrationFormData extends UserDataRegister {
   serialNumber?: string;
   deviceName?: string;
+  phoneNumber?:string;
   latitude?: string; // Mantido como string para o input/display, será convertido para número no envio
   longitude?: string; // Mantido como string para o input/display, será convertido para número no envio
 }
@@ -497,7 +498,21 @@ const RegistroScreen: React.FC<RegistroScreenProps> = ({ navigation }) => {
       // Para 'PARENT', os campos de dispositivo (serialNumber, etc.) estarão vazios ou ausentes no apiPayload
       // se não fizerem parte da estrutura inicial de registerData para PARENT,
       // ou serão enviados como strings vazias se estiverem. A API deve ignorá-los para PARENT.
-
+      else if (registerData.recordType === 'PARENT') {
+        // Validação específica para PARENT, como o número de telefone
+        if (!registerData.phoneNumber) {
+          alert("Para parentes, o Número de Telefone é obrigatório.");
+          return;
+        }
+        // Não precisa remover campos de dispositivo, pois eles não serão preenchidos
+        // ou a API deve ignorá-los para o tipo PARENT.
+        // Se a API for rigorosa, você pode querer limpar explicitamente os campos de dispositivo aqui:
+        // delete apiPayload.serialNumber;
+        // delete apiPayload.deviceName;
+        // delete apiPayload.latitude;
+        // delete apiPayload.longitude;
+        // delete apiPayload.parentEmail; // parentEmail não faz sentido para um PARENT
+      }
       await registerUser(apiPayload as UserDataRegister); // Faz o cast para o tipo esperado pela função.
       navigation.replace('SelecionarUsuario');
     }catch(err){
@@ -577,6 +592,17 @@ const RegistroScreen: React.FC<RegistroScreenProps> = ({ navigation }) => {
             value={registerData.parentEmail}
             onChangeText={text => handleChange('parentEmail', text)}
             keyboardType='email-address'
+          />
+        )
+      }
+      {
+        registerData.recordType === 'PARENT' && (
+          <TextInput
+            style={styles.input}
+            placeholder="Número de Telefone"
+            value={registerData.phoneNumber}
+            onChangeText={text => handleChange('phoneNumber', text)}
+            keyboardType='phone-pad'
           />
         )
       }
