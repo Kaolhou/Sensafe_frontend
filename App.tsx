@@ -10,15 +10,25 @@ import axios from 'axios';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
 import * as Application from 'expo-application';
+import * as Linking from 'expo-linking';
+
 
 export type RootStackParamList = {
   Login: undefined;
   Registro: undefined;
   SelecionarUsuario: undefined;
-  Menu: undefined;
+  Menu: { patientId: string };
   ConfigurarDispositivo: undefined;
-  VerLocalizacao: undefined;
+  VerLocalizacao: { patientId: string };
+  Patient:undefined;
 };
+
+interface GeolocationData {
+  latitude: number;
+  longitude: number;
+  timestamp?: string; // Opcional, mas bom ter
+}
+
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -26,32 +36,74 @@ type LoginScreenProps = NativeStackScreenProps<RootStackParamList, 'Login'>;
 type RegistroScreenProps = NativeStackScreenProps<RootStackParamList, 'Registro'>;
 type SelecionarUsuarioScreenProps = NativeStackScreenProps<RootStackParamList, 'SelecionarUsuario'>;
 type MenuScreenProps = NativeStackScreenProps<RootStackParamList, 'Menu'>;
+type PatientScreenProps = NativeStackScreenProps<RootStackParamList, 'Patient'>;
+type VerLocalizacaoScreenProps = NativeStackScreenProps<RootStackParamList, 'VerLocalizacao'>; // Props para VerLocalizacaoScreen
 
 const Logo: React.FC = () => <Text style={styles.logo}>SenseSafe</Text>;
 
-const VerLocalizacaoScreen = () => (
-  <View style={styles.container}>
-    <Logo />
-    <Text style={styles.text}>Localização em Tempo Real</Text>
+const VerLocalizacaoScreen: React.FC<VerLocalizacaoScreenProps> = ({ route }) => {
+  const { patientId } = route.params;
+  const [location, setLocation] = useState<GeolocationData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchLatestLocation = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        // console.log(`Buscando localização para patientId: ${patientId}`);
+        const response = await api.get<GeolocationData>(`/location/latest/${patientId}`);
+        // console.log('API Response:', response.data);
+        setLocation(response.data);
+      } catch (err) {
+        console.error('Erro ao buscar localização:', err);
+        setError(axios.isAxiosError(err) && err.response?.data?.message ? err.response.data.message : 'Não foi possível carregar a localização.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (patientId) {
+      fetchLatestLocation();
+    }
+  }, [patientId]);
+
+  if (isLoading) {
+    return <View style={styles.container}><Logo /><Text>Carregando localização...</Text></View>;
+  }
+
+  if (error) {
+    return <View style={styles.container}><Logo /><Text style={styles.errorText}>Erro: {error}</Text></View>;
+  }
+
+  if (!location) {
+    return <View style={styles.container}><Logo /><Text>Nenhuma localização encontrada para este paciente.</Text></View>;
+  }
+
+  return (
+    <View style={styles.container}>
+      <Logo />
+      <Text style={styles.text}>Localização em Tempo Real (Paciente ID: {patientId})</Text>
       <MapView
         style={styles.map}
         initialRegion={{
-          latitude: -23.55052,  // São Paulo, por exemplo
-          longitude: -46.633308,
+          latitude: location.latitude,
+          longitude: location.longitude,
           latitudeDelta: 0.0922,
           longitudeDelta: 0.0421,
         }}
       >
         <Marker
-          coordinate={{ latitude: -23.55052, longitude: -46.633308 }}
-          title="São Paulo"
-          description="Cidade de São Paulo"
+          coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+          title="Localização Atual"
+          description={`Lat: ${location.latitude.toFixed(4)}, Lon: ${location.longitude.toFixed(4)}`}
         />
       </MapView>
 
   </View>
 );
-
+}
 interface LoginData {
   email: string;
   password: string;
@@ -69,6 +121,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     // Ele deve ser reexecutado se isLoading, payload ou navigation mudarem.
     if (!isLoading && payload?.email.recordType === 'PARENT') {
       console.log("LoginScreen: Tentando navegar para SelecionarUsuario");
+      navigation.replace('SelecionarUsuario');
+    }
+    if (!isLoading && payload?.email.recordType === 'PATIENT') {
+      console.log("LoginScreen: Tentando navegar para PatientScreen");
       navigation.replace('SelecionarUsuario');
     }
   }, [isLoading, payload, navigation]); // Dependências corrigidas
@@ -155,6 +211,131 @@ interface RecordTypeSelectorProps {
   value: RecordTypeValue;
   onChange: (value: 'PATIENT' | 'PARENT') => void;
 }
+
+type ParentData = {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    phoneNumber: string;
+}
+const PatientScreen: React.FC<PatientScreenProps> = ({ navigation }) => {
+  const [parentData,setParentData] = useState<ParentData[]>([]);
+  const {payload,isLoading,token} = useAuth();
+  const [serial,setSerial] = useState('')
+
+  useEffect(() => {
+    let locationInterval: NodeJS.Timeout | undefined = undefined;
+
+    const requestLocationAndLog = async () => {
+      // 1. Solicitar permissão de localização
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          "Permissão Necessária",
+          "Para o monitoramento de localização, precisamos da sua permissão. Por favor, habilite nas configurações do aplicativo."
+        );
+        return;
+      }
+
+      // 2. Função para obter e logar a localização
+      const logCurrentLocation = async () => {
+        try {
+          let location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+          });
+          // console.debug(serial)
+          if(!serial) return 
+          const {status} = await api.post('/location',{
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            serialNumber: serial,
+          })
+          console.log(status)
+        } catch (error) {
+          if(axios.isAxiosError(error)){
+            console.log(error.request)
+          }
+          console.error("Erro ao obter localização (Paciente):", error);
+          // Opcional: Alertar o usuário sobre a falha na obtenção da localização
+          // Alert.alert("Erro de Localização", "Não foi possível obter a localização atual.");
+        }
+      };
+
+      // 3. Logar a localização imediatamente uma vez
+      await logCurrentLocation()
+
+      // 4. Configurar intervalo para logar a localização a cada 1 minuto
+      locationInterval = setInterval(logCurrentLocation, 60000); // 60000 ms = 1 minuto
+    };
+
+    requestLocationAndLog();
+    const getDeviceSerial = async () => {
+      let uniqueIdStr = '';
+
+      try {
+        // Obter ID único do dispositivo (substituto para serial number)
+        if (Platform.OS === 'android') {
+          uniqueIdStr = Application.getAndroidId() || 'unknown_android_id';
+        } else if (Platform.OS === 'ios') {
+          const iosId = await Application.getIosIdForVendorAsync();
+          uniqueIdStr = iosId || 'unknown_ios_id';
+        } else {
+          uniqueIdStr = 'unknown_platform_id';
+        }
+        setSerial(uniqueIdStr)
+      }catch(error){
+        console.error(error)
+      }
+    }
+    getDeviceSerial()
+
+
+    // console.log(payload?.email.id, !isLoading)
+    if (payload?.email.id && !isLoading) {
+      api.get<ParentData[]>(`/r/patient/${payload?.email.id}/parents`)
+      .then((response) => {
+        console.log('Patient data:', response.data);
+        setParentData(response.data);
+      })
+      .catch((error) => {
+        console.error('Error fetching parent data:', error.isAxiosError ? error.message : error);
+        // Considerar mostrar um feedback ao usuário sobre o erro
+      });
+    }
+
+
+    // 5. Limpar o intervalo quando o componente for desmontado
+    return () => {
+      if (locationInterval) {
+        clearInterval(locationInterval);
+      }
+    };
+  }, [isLoading]); // Array de dependências vazio para executar apenas na montagem e desmontagem
+  if(!isLoading && payload?.email.recordType !== 'PATIENT'){
+    navigation.replace('Login')
+    return null;
+  }
+  const handleEmergencyCall = () => {
+    Linking.openURL(`tel:${parentData[0].phoneNumber.replace(' ', '').replace('-', '')}`);
+  };
+
+  return (
+    <View style={styles.patientScreenContainer}>
+      <TouchableOpacity
+        style={styles.patientScreenEmergencyButton}
+        onPress={handleEmergencyCall}
+      >
+        <Icon name="exclamation-triangle" size={70} color="white" />
+        <Text style={styles.patientScreenEmergencyButtonText}>EMERGÊNCIA</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.logoutButtonPatient} onPress={() => logoutUser(navigation)}>
+        <Text style={styles.logoutButtonTextPatient}>Sair</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 const RecordTypeSelector: React.FC<RecordTypeSelectorProps> = ({ value, onChange }) => {
   return (
     <View style={styles.selectorContainer}>
@@ -434,7 +615,7 @@ const RegistroScreen: React.FC<RegistroScreenProps> = ({ navigation }) => {
 };
 
 type Patient = {
-  id: number;
+  id: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -446,9 +627,10 @@ const SelecionarUsuarioScreen: React.FC<SelecionarUsuarioScreenProps> = ({ navig
 
   useEffect(() => {
     const parentEmailId = payload?.email?.id;
-    console.log(parentEmailId,isLoading,parentEmailId && !isLoading)
+    // console.log(parentEmailId,isLoading,parentEmailId && !isLoading)
+    if(payload?.email.recordType === 'PATIENT') navigation.replace('Patient');
     if (parentEmailId && !isLoading) {
-      api.get(`/r/parent/${parentEmailId}`)
+      api.get(`/r/parent/${parentEmailId}/patients`)
         .then((response) => {
           console.log('Parent data:', response.data);
           setPatients(response.data);
@@ -475,14 +657,14 @@ const SelecionarUsuarioScreen: React.FC<SelecionarUsuarioScreenProps> = ({ navig
     <View style={styles.container}>
       <Logo />
       {patients.map((i) => ( // This seems like placeholder data
-        <TouchableOpacity key={i.id} style={styles.button} onPress={() => navigation.navigate('Menu')}>
+        <TouchableOpacity key={i.id} style={styles.button} onPress={() => navigation.navigate('Menu',{patientId: i.id})}>
           <Text style={styles.buttonText}>{i.firstName} {i.lastName}</Text>
         </TouchableOpacity>
       ))}
-      <TouchableOpacity style={styles.newUserButton} onPress={() => alert('Novo usuário!')}>
+      {/* <TouchableOpacity style={styles.newUserButton} onPress={() => alert('Novo usuário!')}>
         <Icon name="user-plus" size={30} color="#6200ee" />
         <Text style={styles.newUserButtonText}>Novo Usuário</Text>
-      </TouchableOpacity>
+      </TouchableOpacity> */}
       <TouchableOpacity onPress={()=>logoutUser(navigation)}>
         <Text style={{color:'#ca0000',marginVertical:5,padding:5}}>Sair</Text>
       </TouchableOpacity>
@@ -490,18 +672,18 @@ const SelecionarUsuarioScreen: React.FC<SelecionarUsuarioScreenProps> = ({ navig
   );
 };
 
-const MenuScreen: React.FC<MenuScreenProps> = ({ navigation }) => (
+const MenuScreen: React.FC<MenuScreenProps> = ({ navigation,route }) => (
   <ScrollView contentContainerStyle={styles.container}>
     <Logo />
-    <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('VerLocalizacao')}>
+    <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('VerLocalizacao', { patientId: route.params.patientId })}>
       <Text style={styles.buttonText}>Ver Localização</Text>
     </TouchableOpacity>
     <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('ConfigurarDispositivo')}>
       <Text style={styles.buttonText}>Configurar Dispositivo</Text>
     </TouchableOpacity>
-    <TouchableOpacity style={styles.button} onPress={() => alert('Modo Emergência Ativado!')}>
+    {/* <TouchableOpacity style={styles.button} onPress={() => alert('Modo Emergência Ativado!')}>
       <Text style={styles.buttonText}>Emergência</Text>
-    </TouchableOpacity>
+    </TouchableOpacity> */}
   </ScrollView>
 );
 
@@ -521,6 +703,7 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Registro" component={RegistroScreen} />
         <Stack.Screen name="SelecionarUsuario" component={SelecionarUsuarioScreen} />
+        <Stack.Screen name="Patient" component={PatientScreen} />
         <Stack.Screen name="Menu" component={MenuScreen} />
         <Stack.Screen name="ConfigurarDispositivo" component={ConfigurarDispositivoScreen} />
         <Stack.Screen name="VerLocalizacao" component={VerLocalizacaoScreen} />
@@ -661,6 +844,57 @@ export const styles = StyleSheet.create({
     fontStyle: 'italic',
     color: '#555',
     textAlign: 'center',
-  }
+  },
+  // Styles for PatientScreen
+  patientScreenContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff', // White background for a cleaner look
+  },
+  patientScreenEmergencyButton: {
+    backgroundColor: '#d9534f', // Red color for emergency
+    width: 220, // Larger button
+    height: 220, // Larger button
+    borderRadius: 110, // Make it circular
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    // Shadow for Android
+    elevation: 8,
+    // Shadow for iOS
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.30,
+    shadowRadius: 4.65,
+  },
+  patientScreenEmergencyButtonText: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginTop: 15, // Space between icon and text
+    textAlign: 'center',
+  },
+  logoutButtonPatient: { // Style for the logout button on PatientScreen
+    marginTop: 30, // Add some space above the logout button
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    // You can add more styling like background or border if needed
+  },
+  logoutButtonTextPatient: { // Style for the logout button text on PatientScreen
+    color: '#ca0000', // Red color for logout
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  errorText: { // Adicionado para mensagens de erro
+    color: 'red',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 10,
+  },
 
 });

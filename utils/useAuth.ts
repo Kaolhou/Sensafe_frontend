@@ -32,25 +32,25 @@ export function useAuth() {
   useEffect(() => {
     const checkAuth = async () => {
       setIsLoading(true);
-      console.log('[useAuth.ts] checkAuth - Iniciando verificação de autenticação.'); // LOG 3
+      // console.log('[useAuth.ts] checkAuth - Iniciando verificação de autenticação.'); // LOG 3
       try {
         const storedToken = await AsyncStorage.getItem('token'); // Certifique-se que a chave é 'token'
-        console.log('[useAuth.ts] checkAuth - Token lido do AsyncStorage:', storedToken); // LOG 4
+        // console.log('[useAuth.ts] checkAuth - Token lido do AsyncStorage:', storedToken); // LOG 4
 
         if (storedToken) {
           setToken(storedToken);
           try {
             const decodedPayload = jwt_decode<SessionPayload>(storedToken);
-            console.log('[useAuth.ts] checkAuth - Payload decodificado:', decodedPayload); // LOG 5
+            // console.log('[useAuth.ts] checkAuth - Payload decodificado:', decodedPayload); // LOG 5
             setPayload(decodedPayload);
           } catch (decodeError) {
-            console.error('[useAuth.ts] checkAuth - Erro ao decodificar token:', decodeError);
+            // console.error('[useAuth.ts] checkAuth - Erro ao decodificar token:', decodeError);
             await AsyncStorage.removeItem('token');
             setToken(undefined);
             setPayload(undefined);
           }
         } else {
-          console.log('[useAuth.ts] checkAuth - Nenhum token encontrado no AsyncStorage.'); // LOG 6
+          // console.log('[useAuth.ts] checkAuth - Nenhum token encontrado no AsyncStorage.'); // LOG 6
           setToken(undefined);
           setPayload(undefined);
         }
@@ -60,7 +60,7 @@ export function useAuth() {
         setPayload(undefined);
       } finally {
         setIsLoading(false);
-        console.log('[useAuth.ts] checkAuth - Verificação de autenticação finalizada. isLoading:', false); // LOG 7
+        // console.log('[useAuth.ts] checkAuth - Verificação de autenticação finalizada. isLoading:', false); // LOG 7
       }
     };
 
